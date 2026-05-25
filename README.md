@@ -6,11 +6,11 @@ To evaluate models’ abilities to predict long range interactions for synthetic
 
 ## How It Works
 
-For all 30 genes in the dataset, the evaluator:
+For all 30 genes in the dataset, the Evaluator:
 
 1. Builds a request containing the reference gene sequence and one shuffled-enhancer variant per enhancer–gene pair
 2. Negotiates serialization format (JSON or MsgPack) with the predictor
-3. POSTs sequences to the predictor's `/predict` endpoint
+3. POSTs sequences to the Predictor's `/predict` endpoint
 4. Computes the predicted fractional change in expression: `(predicted - reference) / reference`
 5. Calculates Pearson *r* against measured CRISPRi fractional changes
 6. Saves per-gene metrics and a final averaged Pearson *r* across all genes
@@ -18,7 +18,7 @@ For all 30 genes in the dataset, the evaluator:
 
 ### Run Evaluator using Apptainer container
 
-Download container and evaluator data from Zenodod: <LINK>
+Download container and evaluator data from Zenodo: <LINK>
 
 ```bash
 apptainer run --containall \
@@ -44,9 +44,9 @@ apptainer run --containall \
 One POST request is sent per gene (30 total), due to large sequence sizes. Each request contains:
 
 - **One reference sequence** — a 4 Mb window centered on the gene's TSS (±2 Mb) `fulco_reference_gene_sequence.parquet`
-- **One shuffled-enhancer sequence per enhancer–gene pair** — The file `fulco_evaluator_coordinates.parquet` contains the coordinated for each enhancer. The Evaluator `data_loader.py` code with shuffle the bases of the target enhancer in-place to represent "inactivation" (the rest of the sequence remains unchanged). A fixed random seed (`seed=42`) is used for reproducibility.
+- **One shuffled-enhancer sequence per enhancer–gene pair** — The file `fulco_evaluator_coordinates.parquet` contains the coordinates for each enhancer. The Evaluator `data_loader.py` code will shuffle the bases of the target enhancer in-place to represent "inactivation" (the rest of the sequence remains unchanged). A fixed random seed (`seed=42`) is used for reproducibility.
 
-**Strand handling:** If the gene is on the negative strand, the reverse complement of the full 4 Mb window is taken — both for the reference sequence and for each shuffled-enhancer sequence — after the enhancer shuffle is applied. This ensures sequences are always presented in the 5'→3' direction of the gene.
+**Strand handling:** If the gene is on the negative strand, the reverse complement of the full 4 Mb window is taken — both for the reference sequence and for each shuffled-enhancer sequence — after the enhancer shuffling is applied. This ensures sequences are always presented in the 5'→3' direction of the gene.
 
 `prediction_ranges` specifies the gene body coordinates relative to the sequence window for each sequence (2Mbp -> 2Mbp + gene length). This requests predictions at the gene in its native context or with the effect of the mutated enhancer (shuffled).
 

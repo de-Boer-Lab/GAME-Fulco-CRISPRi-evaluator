@@ -45,58 +45,58 @@ plt.savefig("/scratch/st-cdeboer-1/iluthra/game_apis/RestAPI/Fulco_CRISPRi/evalu
 
 
 
-# #Read in consensus gene coordinates
-# gene_coordinates = pd.read_csv("/scratch/st-cdeboer-1/iluthra/game_apis/RestAPI/Fulco_CRISPRi/evaluator_data/Supplementary Table 5b. Human gene annotations from RefSeq collapsed to a single consensus annotation per gene.csv", sep = ";", engine = "python")
-# #print(gene_coordinates)
+#Read in consensus gene coordinates
+gene_coordinates = pd.read_csv("/scratch/st-cdeboer-1/iluthra/game_apis/RestAPI/Fulco_CRISPRi/evaluator_data/Supplementary Table 5b. Human gene annotations from RefSeq collapsed to a single consensus annotation per gene.csv", sep = ";", engine = "python")
+#print(gene_coordinates)
 
-# #Extract coordinates for genes that were tested
-# gene_coordinates_fulco = gene_coordinates[gene_coordinates["Gene"].isin(genes_tested)]
-# gene_coordinates.columns = ['gene_chr', 'gene_start', 'gene_end', 'Gene', 'strand']
-# #print(gene_coordinates_fulco)
-# print(gene_coordinates_fulco.shape)
+#Extract coordinates for genes that were tested
+gene_coordinates_fulco = gene_coordinates[gene_coordinates["Gene"].isin(genes_tested)]
+gene_coordinates.columns = ['gene_chr', 'gene_start', 'gene_end', 'Gene', 'strand']
+#print(gene_coordinates_fulco)
+print(gene_coordinates_fulco.shape)
 
-# #Merge gene locations with e-g pair data
-# merged_eg_pairs = pd.merge(eg_pairs, gene_coordinates, how='left', on = 'Gene')
-# print(merged_eg_pairs.columns)
+#Merge gene locations with e-g pair data
+merged_eg_pairs = pd.merge(eg_pairs, gene_coordinates, how='left', on = 'Gene')
+print(merged_eg_pairs.columns)
 
-# #Calculate distance from start of "enhancer" to start of gene -> can be up or downstream
-# merged_eg_pairs['distance_to_gene'] = abs(merged_eg_pairs["start"] - merged_eg_pairs["gene_start"])
+#Calculate distance from start of "enhancer" to start of gene -> can be up or downstream
+merged_eg_pairs['distance_to_gene'] = abs(merged_eg_pairs["start"] - merged_eg_pairs["gene_start"])
 
-# #Pull sequence 2MB up and downstream
-# merged_eg_pairs["sequence_start"] = merged_eg_pairs['gene_start'] - 2000000
-# merged_eg_pairs["sequence_end"] = merged_eg_pairs['gene_start'] + 2000000
-# print(merged_eg_pairs)
+#Pull sequence 2MB up and downstream
+merged_eg_pairs["sequence_start"] = merged_eg_pairs['gene_start'] - 2000000
+merged_eg_pairs["sequence_end"] = merged_eg_pairs['gene_start'] + 2000000
+print(merged_eg_pairs)
 
-# #check that enhancers are in this sequence we are pulling
-# mask = (merged_eg_pairs["start"] >= merged_eg_pairs["sequence_start"]) & (merged_eg_pairs["end"] <= merged_eg_pairs["sequence_end"])
-# merged_eg_pairs_filtered = merged_eg_pairs[mask]
-# #We loose 32 e-g pairs when we set sequence window to 4MB
-# print(merged_eg_pairs_filtered)
-# # print(df_invalid)
+#check that enhancers are in this sequence we are pulling
+mask = (merged_eg_pairs["start"] >= merged_eg_pairs["sequence_start"]) & (merged_eg_pairs["end"] <= merged_eg_pairs["sequence_end"])
+merged_eg_pairs_filtered = merged_eg_pairs[mask]
+#We loose 32 e-g pairs when we set sequence window to 4MB
+print(merged_eg_pairs_filtered)
+# print(df_invalid)
 
-# #merged_eg_pairs_filtered = merged_eg_pairs_filtered.head(5)
-# sequences = []
-# for i in range(0,len(merged_eg_pairs_filtered)):
-#     chrom_current = merged_eg_pairs_filtered['gene_chr'].iloc[i]
-#     start_current = merged_eg_pairs_filtered['sequence_start'].iloc[i]
-#     end_current = merged_eg_pairs_filtered['sequence_end'].iloc[i]
-#     seq = genome.fetch(chrom_current, start_current,  end_current)
-#     seq = seq.upper()
-#     sequences.append(seq)
+#merged_eg_pairs_filtered = merged_eg_pairs_filtered.head(5)
+sequences = []
+for i in range(0,len(merged_eg_pairs_filtered)):
+    chrom_current = merged_eg_pairs_filtered['gene_chr'].iloc[i]
+    start_current = merged_eg_pairs_filtered['sequence_start'].iloc[i]
+    end_current = merged_eg_pairs_filtered['sequence_end'].iloc[i]
+    seq = genome.fetch(chrom_current, start_current,  end_current)
+    seq = seq.upper()
+    sequences.append(seq)
 
-# merged_eg_pairs_filtered['sequence'] = sequences
-# print(merged_eg_pairs_filtered)
+merged_eg_pairs_filtered['sequence'] = sequences
+print(merged_eg_pairs_filtered)
 
 
-# gene_and_sequence = merged_eg_pairs_filtered[["Gene", "sequence"]].copy()
-# print(gene_and_sequence)
-# gene_and_sequence_unique = gene_and_sequence.drop_duplicates()
-# print(gene_and_sequence_unique)
-# print(gene_and_sequence_unique.shape)
+gene_and_sequence = merged_eg_pairs_filtered[["Gene", "sequence"]].copy()
+print(gene_and_sequence)
+gene_and_sequence_unique = gene_and_sequence.drop_duplicates()
+print(gene_and_sequence_unique)
+print(gene_and_sequence_unique.shape)
 
-# gene_and_sequence_unique.to_parquet("/scratch/st-cdeboer-1/iluthra/game_apis/final_APIs_toPOST/Fulco_CRISPRi/evaluator_data/fulco_reference_gene_sequence.parquet", engine='pyarrow', compression='snappy')
-# print(merged_eg_pairs_filtered)
-# merged_eg_pairs_filtered = merged_eg_pairs_filtered.drop(columns=["sequence"])
-# print(merged_eg_pairs_filtered)
+gene_and_sequence_unique.to_parquet("/scratch/st-cdeboer-1/iluthra/game_apis/final_APIs_toPOST/Fulco_CRISPRi/evaluator_data/fulco_reference_gene_sequence.parquet", engine='pyarrow', compression='snappy')
+print(merged_eg_pairs_filtered)
+merged_eg_pairs_filtered = merged_eg_pairs_filtered.drop(columns=["sequence"])
+print(merged_eg_pairs_filtered)
 
-# merged_eg_pairs_filtered.to_parquet("/scratch/st-cdeboer-1/iluthra/game_apis/final_APIs_toPOST/Fulco_CRISPRi/evaluator_data/fulco_evaluator_coordinates.parquet", engine='pyarrow', compression='snappy')
+merged_eg_pairs_filtered.to_parquet("/scratch/st-cdeboer-1/iluthra/game_apis/final_APIs_toPOST/Fulco_CRISPRi/evaluator_data/fulco_evaluator_coordinates.parquet", engine='pyarrow', compression='snappy')
