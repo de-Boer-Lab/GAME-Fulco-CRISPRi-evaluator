@@ -5,15 +5,13 @@ import sys
 import json
 from requests.exceptions import RequestException, HTTPError
 import glob
-import config
 from data_loader import load_enhancer_gene_pair_data
 from evaluator_content_handler import *
 import evaluator_metrics_calculator
 import pandas as pd
-from config import EVALUATOR_NAME, EVALUATOR_INPUT_PATH_GENE_SEQ, EVALUATOR_INPUT_PATH_Enhancer_coordinates
-from scipy.stats import pearsonr
+from config import EVALUATOR_NAME, EVALUATOR_INPUT_PATH_GENE_SEQ
 from datetime import datetime, timezone
-import time
+
 def run_evaluator(predictor_ip, predictor_port, output_dir):
     """
     Preprocesses the data, sends request, receives response,
@@ -25,11 +23,17 @@ def run_evaluator(predictor_ip, predictor_port, output_dir):
         os.makedirs(output_dir, exist_ok=True)
         print(f"Output directory '{output_dir}' did not exist. Created it successfully!")
         
+    # CHANGE (v1): collect per-gene Pearson r values in memory so the final average does not
+    # depend on globbing/re-reading CSVs (the old glob double-counted the final summary on
+    # re-runs and broke when the 'Value' column held the string "None"/"NaN")
+    per_gene_r_values = []
+    last_predictor_name = "UnknownPredictor"
+        
     #Start a big loop here for all 30 Genes tested
     #This Evaluator will /post 30 requests due to large size
     gene_list = pd.read_parquet(EVALUATOR_INPUT_PATH_GENE_SEQ, columns=["Gene"])
-    for i in range(0, gene_list.shape[0]):
-        gene_current = gene_list.iloc[i]["Gene"]
+    for gene_idx in range(0, gene_list.shape[0]):
+        gene_current = gene_list.iloc[gene_idx]["Gene"]
         print(f"Sending sequence data for gene: {gene_current}")
         # Load and validate data, returns a JSON dictionary
         # This function will be Evaluator specific
@@ -81,14 +85,16 @@ def run_evaluator(predictor_ip, predictor_port, output_dir):
         
         # Save predictions
         predictor_name = response_payload.get("predictor_name", "UnknownPredictor").replace(" ", "_")
-        output_filename = f"{EVALUATOR_NAME}_{gene_current}.json"
+        last_predictor_name = predictor_name  # CHANGE (v1): track for the final summary row
+        # CHANGE (v1): build-aware output filename (predictor name already carries its build stamp)
+        output_filename = f"{EVALUATOR_NAME}_{gene_current}_predictions_from_{predictor_name}.json"
         saved_predictions_path = os.path.join(output_dir, output_filename)
             
         # Check sequence counts before saving
-        for i, task in enumerate(response_payload.get("prediction_tasks", []), start=1):
-            preds = task.get("predictions", [])
+        for task_idx, task in enumerate(response_payload.get("prediction_tasks", []), start=1):
+            preds = task.get("predictions", {})
             if len(preds) != total_sequences:
-                print(f"Warning: Task {i} ('{task.get('name')}') has {len(preds)} predictions, but {total_sequences} sequences were sent to the Predictor.")
+                print(f"Warning: Task {task_idx} ('{task.get('name')}') has {len(preds)} predictions, but {total_sequences} sequences were sent to the Predictor.")
         
         try:
             with open(saved_predictions_path, 'w', encoding='utf-8') as f:
@@ -102,44 +108,51 @@ def run_evaluator(predictor_ip, predictor_port, output_dir):
         if is_success_response:
             all_lengths_match = True
             #Loop through and check all the prediction tasks
-            for i, task in enumerate(response_payload.get("prediction_tasks", []), start=1):
-                preds = task.get("predictions", [])
-                #If there is an error key in one of the predictions don't check length of predictions
+            for task_idx, task in enumerate(response_payload.get("prediction_tasks", []), start=1):
+                # CHANGE (v1): predictions is a dict per spec -> default {} not [].
+                preds = task.get("predictions", {})
+                # CHANGE (v1): if the task reports an error, skip the length check entirely
+                # (the original set the flag True but fell through to the length check, which
+                # then overwrote it to False).
                 if "error" in preds:
-                    all_lengths_match = True
+                    print(f"Task {task_idx} ('{task.get('name')}') returned an error -- skipping length check.")
+                    continue
                 #Otherwise length of predictions needs to == the # of sequences
                 if len(preds) != total_sequences:
-                    print(f"Warning: Task {i} ('{task.get('name')}') has {len(preds)} predictions, but {total_sequences} sequences were sent to the Predictor.")
+                    print(f"Warning: Task {task_idx} ('{task.get('name')}') has {len(preds)} predictions, but {total_sequences} sequences were sent to the Predictor.")
                     all_lengths_match = False
-            if all_lengths_match:    
-                evaluator_metrics_calculator.calculate_and_save_metrics(gene_current, saved_predictions_path, output_dir)
+            if all_lengths_match:
+                # CHANGE (v1): capture the returned r so we can average across genes in memory.
+                gene_r = evaluator_metrics_calculator.calculate_and_save_metrics(gene_current, saved_predictions_path, output_dir)
+                if gene_r is not None:
+                    per_gene_r_values.append(gene_r)
             else:
                 print("Skipping metric calculation because not all sequences got predictions.")
         else:
             print("Skipping metrics calculation because the Predictor did not return a 200 OK status.")
 
-
     #Finally concatenate and average the pearson r for each gene into 1 final pearson r
-    print("Concatenating final metrics to return final pearson r value")
-    csv_files = glob.glob(os.path.join(output_dir, "*.csv"))
-    dfs = [pd.read_csv(f, sep="\t") for f in csv_files]
-    combined_correlations = pd.concat(dfs, ignore_index=True)
+    print("Averaging per-gene Pearson r into one final value")
+    if per_gene_r_values:
+        final_pearsonr = float(pd.Series(per_gene_r_values, dtype="float64").mean())
+        final_value_str = str(final_pearsonr)
+    else:
+        print("No per-gene correlations were computed; final average is NaN.")
+        final_value_str = "NaN"
    
-    final_pearsonr = combined_correlations['Value'].mean()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S.%f")
     evaluation_output = pd.DataFrame([{
-            'Evaluator': EVALUATOR_NAME,
-            'Description': "Average Pearson Correlation across all genes for CRISPRi",
-            'Predictor_name': predictor_name,
-            'Time_stamp': timestamp,
-            'Metric': 'pearson_r',
-            'Value': str(final_pearsonr),
-            'Prediction_task(s)_data': "Can be found in seperate .csv files"
+            'evaluator_name': EVALUATOR_NAME,
+            'description': "Average Pearson Correlation across all genes for CRISPRi",
+            'predictor_name': last_predictor_name,
+            'time_stamp': timestamp,
+            'metric': 'pearson_r',
+            'value': final_value_str,
+            'prediction_task(s)_data': "See per-gene rows in this same file"
         }])
-        #print(evaluation_output)
-    correlation_summary_filepath =  f"correlation_summary_{EVALUATOR_NAME}_final.csv"
-    evaluation_output.to_csv(output_dir + '/' + correlation_summary_filepath , sep = "\t")
-
+    summary_filepath = os.path.join(output_dir, f"evaluation_summary_{EVALUATOR_NAME}.csv")
+    evaluator_metrics_calculator._save_df_to_csv(evaluation_output, summary_filepath)
+    
 
 if __name__ == '__main__':
     # Check that mandatory arguments are passed to the script

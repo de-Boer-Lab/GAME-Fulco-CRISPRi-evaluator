@@ -2,14 +2,14 @@
 
 import os
 import json
-import msgpack
 from collections import Counter
 import functools
 import pandas as pd
 import random
-from config import EVALUATOR_INPUT_PATH_GENE_SEQ, EVALUATOR_INPUT_PATH_Enhancer_coordinates
-
+#set seed so the enhancer shuffling is reproducible
 random.seed(42)
+from Bio.Seq import Seq
+from config import EVALUATOR_INPUT_PATH_GENE_SEQ, EVALUATOR_INPUT_PATH_Enhancer_coordinates
 
 class DuplicateKeysError(ValueError):
     """Raised when duplicate keys are found in a JSON object."""
@@ -139,7 +139,7 @@ def check_duplicates_from_json(json_file_path):
         
     return _process_results(data, duplicate_keys)
 
-def shuffle_enhancer(row, gene_sequence):
+def shuffle_enhancer(row, gene_sequence, strand):
     #seq = row["sequence"]  # full pulled window sequence
     seq = gene_sequence
     # enhancer coords relative to the window
@@ -149,7 +149,6 @@ def shuffle_enhancer(row, gene_sequence):
     #Gene coordinates relative to the window
     gene_start_relative = row["gene_start"] - row["sequence_start"]
     gene_end_relative   = row["gene_end"] - row["sequence_start"]
-
     # extract enhancer substring
     enhancer_seq = list(seq[enh_start:enh_end])
 
@@ -159,7 +158,10 @@ def shuffle_enhancer(row, gene_sequence):
     #print(shuffled_enhancer)
     # rebuild full sequence with shuffled enhancer in place
     shuffled_full_seq = seq[:enh_start] + shuffled_enhancer + seq[enh_end:]
-    
+    #if the gene is on the negative strand take the reverse complement of the full sequence after shuffling the enhancer
+    if strand == "-":
+        shuffled_full_seq = str(Seq(shuffled_full_seq).reverse_complement())
+
     return pd.Series({
             "shuffled_enhancer": shuffled_full_seq,
             "gene_start_relative": gene_start_relative,
@@ -196,32 +198,47 @@ def load_enhancer_gene_pair_data(gene):
     try:
         gene_sequences = pd.read_parquet(EVALUATOR_INPUT_PATH_GENE_SEQ)
         gene_sequence_current = gene_sequences.loc[gene_sequences['Gene'] == gene, 'sequence'].iloc[0]
-
+        gene_strand_current = gene_sequences.loc[gene_sequences['Gene'] == gene, 'strand'].iloc[0]
+        
         #this will pull all the e-g pairs for the current gene
         eg_coordinates = pd.read_parquet(EVALUATOR_INPUT_PATH_Enhancer_coordinates)
-        eg_coordinates_current = eg_coordinates[eg_coordinates['Gene'] == gene]
+        eg_coordinates_current = eg_coordinates[eg_coordinates['Gene'] == gene].copy()
 
-
-        eg_coordinates_current[["shuffled_enhancer", "gene_start_relative", "gene_end_relative"]] = eg_coordinates_current.apply(shuffle_enhancer, axis=1, args = (gene_sequence_current,))
-
-        json_evaluator = {
-            "readout": "point"
-        }
-        json_evaluator["prediction_tasks"] = [
-            {
-                "name": gene,
-                "type": "expression", 
+        eg_coordinates_current[["shuffled_enhancer", "gene_start_relative", "gene_end_relative"]] = eg_coordinates_current.apply(shuffle_enhancer, axis=1, args = (gene_sequence_current,  gene_strand_current,))
+        #If the gene is on the negative strand take the reverse complement of the reference gene sequence
+        if gene_strand_current == "-":
+            gene_sequence_current = str(Seq(gene_sequence_current).reverse_complement())
+            
+        prediction_tasks_str = f"""
+        [
+            {{
+                "name": "{gene}",
+                "type": "expression",
                 "cell_type": "K562",
                 "scale": "linear",
                 "species": "homo_sapiens"
-            }
+            }}
         ]
+        """
+        prediction_tasks = check_duplicates_from_string(prediction_tasks_str)
 
         sequence_dict = {gene + '_reference_seq': gene_sequence_current}
         eg_dict = dict(zip(gene + "_" + eg_coordinates_current["Element name"], eg_coordinates_current["shuffled_enhancer"]))
 
         sequence_dict.update(eg_dict)
-        json_evaluator['sequences'] = sequence_dict
+
+        gene_start = int(eg_coordinates_current["gene_start_relative"].unique()[0])
+        gene_end = int(eg_coordinates_current["gene_end_relative"].unique()[0])
+        gene_ranges_current = [gene_start, gene_end]
+        prediction_ranges_dict  = {key: gene_ranges_current for key in sequence_dict.keys()}
+        
+        # Assemble the request payload (metadata already duplicate-checked above).
+        json_evaluator = {
+            "readout": "point",
+            "prediction_tasks": prediction_tasks,
+            "sequences": sequence_dict,
+            "prediction_ranges": prediction_ranges_dict
+        }
 
         data_dict = check_duplicates_from_string(json.dumps(json_evaluator))
 
