@@ -3,14 +3,18 @@ From: python:3.13-slim
 Stage: build
 
 %files
-    ../Fulco_CRISPRi/ /Fulco_CRISPRi
+    config.py /app/config.py
+    data_loader.py /app/data_loader.py
+    evaluator_content_handler.py /app/evaluator_content_handler.py
+    evaluator_metrics_calculator.py /app/evaluator_metrics_calculator.py
+    Fulco_evaluator.py /app/Fulco_evaluator.py
 
 %environment
     # Prevent automatic binding of host directories
     export APPTAINER_NO_MOUNT="home,tmp,proc,sys,dev"
     export LC_ALL=C
     export PATH="/usr/local/bin:$PATH"
-    export PYTHONPATH="/Fulco_CRISPRi:$PYTHONPATH"
+    export PYTHONPATH="/app:$PYTHONPATH"
 
 %post
     # Install system packages and dependencies
@@ -21,77 +25,62 @@ Stage: build
 
     echo "Installing Python dependencies..."
     python -m pip install --upgrade pip
-    python -m pip install --no-cache-dir numpy tqdm pandas openpyxl msgpack scipy requests fastparquet
+    python -m pip install --no-cache-dir numpy tqdm pandas msgpack scipy requests fastparquet biopython
 
-    # Set permissions to access all directories
-    echo "Setting permissions for directories and script..."
-    chmod -R 755 /Fulco_CRISPRi
+    # Set permissions on the evaluator scripts
+    echo "Setting permissions for the evaluator scripts..."
+    chmod -R 755 /app
 
 %runscript
-    # This section defines the default run behavior of the container
-    exec python3 /Fulco_CRISPRi/Fulco_evaluator.py "$@"
+    # Default run behavior of the container
+    exec python3 /app/Fulco_evaluator.py "$@"
 
 %startscript
-    exec python3 /Fulco_CRISPRi/Fulco_evaluator.py "$@"
+    exec python3 /app/Fulco_evaluator.py "$@"
+
+%test
+    # Runs at build time (unless --notest): fail the build early on a missing dep or import error.
+    echo "Verifying Python dependencies import..."
+    python3 -c "import numpy, pandas, scipy, msgpack, requests, tqdm, fastparquet; from Bio.Seq import Seq; print('deps OK')"
+    echo "Verifying evaluator modules import..."
+    python3 -c "import sys; sys.path.insert(0, '/app'); import config, data_loader, evaluator_content_handler, evaluator_metrics_calculator, Fulco_evaluator; print('modules import OK')"
 
 %labels
-    Author "Ishika Luthra"
-    Version "4.0"
-    Description 
+    Author "Ishika Luthra, Satyam Priyadarshi"
+    game_schema_version "1.0"
+    Description "Evaluator for the Genomic API for Model Evaluation -- Fulco 2019 CRISPRi enhancer-gene dataset (K562)."
 
 %help
-    This container includes:
-    - Evaluator API script for genomic sequence evaluation.
-    - Evaluator utility script with helper functions.
-    - Evaluation metrics script for correlation and specificity calculation.
-    - Installed Python dependencies required by the Evaluator.
+    Fulco 2019 CRISPRi dataset. Endogenous enhancers are synthetically repressed and their effects 
+    on 30 unique genes are measured in K562 cells. For each gene it shuffles the enhancer
+    bases within the reference window, reverse-complements the reference + shuffled sequences for
+    negative-strand genes, and sends one `/predict` request per gene (30 requests, large sequences).
+    It computes a per-gene Pearson r between predicted and measured fractional change in expression,
+    writes one row per gene, and appends a final cross-gene average row -- all to a single
+    tab-separated file: evaluation_summary_<evaluator_name>.csv.
 
-    **Usage:**
-    We encourage using pre-built containers for this model that are hosted on Zenodo.
+    The image contains ONLY the evaluator scripts. Input data is provided at runtime by
+    bind-mounting your evaluator_data directory to `/evaluator_data`, and predictions + summary are
+    written to a mounted output directory. config.py auto-detects the container and reads
+    `/evaluator_data`.
 
-    However, if you are building the container using this definition file, ensure you have the following directory structure on the host:
-    ```
-    /evaluator_script_and_utils/
-    ├── README.md
-    ├── evaluator_RestAPI.py
-    ├── evaluator_content_handler.py
-    ├── evaluator_data
-    │   └── 2023-03-03628-s5/
-    ├── config.py
-    ├── evaluator_metrics_calculator.py
-    └── predictions/
-    ```
+    Expected evaluator_data layout (host side):
 
-    Build the container (SIF)
-    ```
-    apptainer build agarwal_evaluator.sif agarwal_evaluator.def
-    ```
+        evaluator_data/
+        ├── fulco_reference_gene_sequence.parquet   (columns: Gene, sequence, strand)
+        └── fulco_evaluator_coordinates.parquet     (columns: Gene, Element name, start, end,
+                                                      sequence_start, gene_start, gene_end,
+                                                      "Fraction change in gene expr")
 
-    Bind these directories and run the container:
-    ```bash
-    apptainer run \
-      -B absolute/path/to/evaluator_data:/evaluator_data \
-      -B absolute/path/to/predictions:/predictions \
-      agarwal_evaluator.sif PREDICTOR_HOST PREDICTOR_PORT /predictions
-    ```
-    
-    Details:
-    - The container sends and receives data via a TCP socket and requires directories to be mounted.
-    - Replace `PREDICTOR_HOST` and `PREDICTOR_PORT` with the server IP and port configuration.
-
-    Purpose:
-    - Facilitates genomic sequence evaluation by interacting with the Predictor container.
-    - Handles input/output through bound directories.
-
-    Example Command:
-    ```bash
-    apptainer run --containall \
-      -B absolute/path/to/evaluator_data:/evaluator_data \
-      -B absolute/path/to/predictions:/predictions \
-      agarwal_evaluator.sif 172.**.47.*** 5000 /predictions
-    ```
+    Run:
+        ```
+        apptainer run \
+          -B /abs/path/to/evaluator_data:/evaluator_data \
+          -B /abs/path/to/predictions:/predictions \
+          fulco_evaluator.sif PREDICTOR_HOST PREDICTOR_PORT /predictions
+        ```
 
     Arguments:
-    1. `PREDICTOR_HOST`: IP address or hostname of the Predictor server.
-    2. `PREDICTOR_PORT`: Port number the Predictor is listening on.
-    3. `/predictions`: Mounted path inside the container for storing output predictions.
+        1. `PREDICTOR_HOST` : IP address or hostname of the Predictor server.
+        2. `PREDICTOR_PORT` : Port the Predictor is listening on.
+        3. `/predictions`   : Mounted path inside the container for per-gene predictions + summary CSV.
