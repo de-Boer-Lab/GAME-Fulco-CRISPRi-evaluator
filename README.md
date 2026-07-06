@@ -18,7 +18,7 @@ For all 30 genes in the dataset, the Evaluator:
 
 ### Run Evaluator using Apptainer container
 
-Download container and evaluator data from Zenodo: <LINK>
+Download container and evaluator data from Hugging Face: https://huggingface.co/datasets/deBoerLab/FulcoCRISPRi
 
 ```bash
 apptainer run --containall \
