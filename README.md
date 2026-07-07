@@ -2,6 +2,13 @@
 
 To evaluate models’ abilities to predict long range interactions for synthetic modifications we included the Fulco et al. CRISPRi dataset (https://www.nature.com/articles/s41588-019-0538-0#Sec19). Endogenous enhancers are synthetically repressed and their effects on 30 unique genes are measured in K562 cells.
 
+## Important Links
+
+- Main GAME Repository: [de-Boer-Lab/Genomic-API-for-Model-Evaluation](https://github.com/de-Boer-Lab/Genomic-API-for-Model-Evaluation)
+- GAME Documentation: [ReadTheDocs](https://genomic-api-for-model-evaluation-documentation.readthedocs.io)
+- Pre-built Evaluator container image and data: [Hugging Face](https://huggingface.co/datasets/deBoerLab/FulcoCRISPRi)
+- List of all [GAME Modules](https://github.com/de-Boer-Lab/GAME_modules)
+
 ---
 
 ## How It Works
@@ -18,7 +25,7 @@ For all 30 genes in the dataset, the Evaluator:
 
 ### Run Evaluator using Apptainer container
 
-Download container and evaluator data from Hugging Face: https://huggingface.co/datasets/deBoerLab/FulcoCRISPRi
+Download container and evaluator data from Hugging Face (see [Important Links](#important-links) above), then run:
 
 ```bash
 apptainer run --containall \
